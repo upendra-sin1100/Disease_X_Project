@@ -1,0 +1,7 @@
+streamlit
+pandas
+psycopg2-binary
+joblib
+scikit-learn
+python-dotenv
+os
