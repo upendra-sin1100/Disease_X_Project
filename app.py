@@ -22,7 +22,7 @@ def get_db_connection():
 
 @st.cache_resource
 def load_model():
-    checkpoint = joblib.load(r'D:\Disease_X_Project\disease_x_vulnerability_v1.pkl')
+    checkpoint = joblib.load('disease_x_vulnerability_v1.pkl')
     return checkpoint['model'], checkpoint['features']
 
 model, expected_features = load_model()
