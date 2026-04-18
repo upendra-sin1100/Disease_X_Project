@@ -8,9 +8,9 @@ from datetime import datetime
 
 load_dotenv()
 
-DB_HOST = "localhost"
-DB_NAME = "disease_x_db"
-DB_PORT = "5432"
+DB_HOST = os.getenv("DB_HOST")
+DB_NAME = os.getenv("DB_NAME")
+DB_PORT = os.getenv("DB_PORT")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
@@ -227,26 +227,6 @@ def get_available_facilities():
     except:
         return [(1,"Central City Hospital"),(2,"Mercy General"),(3,"County Medical")]
 
-@st.cache_data(ttl=60)
-def get_dashboard_stats():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT 
-                SUM(f.current_occupancy) AS total_patients,
-                SUM(f.max_capacity - f.current_occupancy) AS total_beds,
-                COUNT(p.patient_id) FILTER (WHERE p.clinical_status='Critical') AS critical_count,
-                ROUND(AVG(p.ml_vulnerability_score)::numeric, 1) AS avg_score
-            FROM Facilities f
-            LEFT JOIN Patients p ON f.facility_id = p.facility_id;
-        """)
-        row = cur.fetchone()
-        cur.close(); conn.close()
-        return row
-    except:
-        return (None, None, None, None)
-
 # ── HEADER ─────────────────────────────────────────────────
 st.markdown("""
 <div class="cx-header">
@@ -261,17 +241,47 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ── LIVE STATS ROW ────────────────────────────────────────
-stats = get_dashboard_stats()
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.markdown(f'<div class="cx-metric-card"><div class="cx-metric-label">Active Patients</div><div class="cx-metric-value">{stats[0] or "—"}</div></div>', unsafe_allow_html=True)
-with c2:
-    st.markdown(f'<div class="cx-metric-card"><div class="cx-metric-label">Beds Available</div><div class="cx-metric-value safe">{stats[1] or "—"}</div></div>', unsafe_allow_html=True)
-with c3:
-    st.markdown(f'<div class="cx-metric-card"><div class="cx-metric-label">Critical Cases</div><div class="cx-metric-value danger">{stats[2] or "—"}</div></div>', unsafe_allow_html=True)
-with c4:
-    st.markdown(f'<div class="cx-metric-card"><div class="cx-metric-label">Avg Risk Score</div><div class="cx-metric-value">{stats[3] or "—"}%</div></div>', unsafe_allow_html=True)
+# ---------------------------------------------------------
+# FETCH GLOBAL STATS FROM POSTGRESQL
+# ---------------------------------------------------------
+try:
+    conn = get_db_connection()
+    stats_query = """
+    SELECT 
+        COUNT(patient_id) AS total_patients,
+        COALESCE(COUNT(patient_id) FILTER (WHERE clinical_status = 'Critical'), 0) AS critical_cases,
+        COALESCE(ROUND(AVG(ml_vulnerability_score)::numeric, 1), 0) AS avg_risk,
+        (SELECT SUM(max_capacity - current_occupancy) FROM Facilities) AS beds_available
+    FROM Patients;
+    """
+    df_stats = pd.read_sql(stats_query, conn)
+    conn.close()
+
+    # Extract the numbers from the dataframe
+    active_pts = df_stats['total_patients'][0]
+    critical_pts = df_stats['critical_cases'][0]
+    avg_risk = df_stats['avg_risk'][0]
+    beds_avail = df_stats['beds_available'][0]
+
+except Exception as e:
+    # Fallback if the database is asleep
+    active_pts, critical_pts, avg_risk, beds_avail = "-", "-", "-", "-"
+    st.error(f"Could not load global stats: {e}")
+
+# ---------------------------------------------------------
+# RENDER THE TOP METRICS ROW
+# ---------------------------------------------------------
+m1, m2, m3, m4 = st.columns(4)
+
+with m1:
+    st.metric("ACTIVE PATIENTS", active_pts)
+with m2:
+    st.metric("BEDS AVAILABLE", beds_avail)
+with m3:
+    st.metric("CRITICAL CASES", critical_pts)
+with m4:
+    # Add the percentage sign dynamically
+    st.metric("AVG RISK SCORE", f"{avg_risk}%" if avg_risk != "-" else "-%")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -418,9 +428,6 @@ if run:
 
     # System log
     st.markdown(f'<div class="cx-log">{"<br>".join(log_lines)}</div>', unsafe_allow_html=True)
-
-    # Refresh live stats
-    get_dashboard_stats.clear()
 
 else:
     st.markdown("""
