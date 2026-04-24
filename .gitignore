@@ -1,4 +1,9 @@
+# Environment variables - contains sensitive credentials
 .env
+
+# Trained ML model files - these can be large binaries
 *.pkl
+
+# Python cache files
 __pycache__/
 *.pyc
